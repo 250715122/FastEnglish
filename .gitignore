@@ -31,6 +31,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
@@ -39,3 +40,20 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# ByteRover — .brv/context-tree/ contains a nested .git managed by brv vc.
+# Without these entries, `git add .` fails with "does not have a commit checked out".
+.brv/
+
+# 本地片源，动辄几个 GB，不要进仓库
+video/
+
+# 词典数据，用 npm run fetch-dict 拉取
+dict/
+
+# 下载来的字幕是第三方版权内容，也暴露看过哪些片，留在本机就好
+subtitles/
+
+# 个人学习记录：已掌握的词、收藏的句子、自己写的注释。
+# 目录由开发服务器按需创建，克隆下来不影响运行
+vocab/

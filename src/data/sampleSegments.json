@@ -1,0 +1,15 @@
+{
+  "title": "Big Buck Bunny（演示字幕）",
+  "note": "手写的演示数据，用于在没有真实字幕文件时展示字幕跟随、逐句跳转与单句循环；时间轴为演示用途手工设定，未与画面逐帧对齐，正好可以试试字幕偏移微调",
+  "videoUri": "https://media.w3.org/2010/05/bunny/movie.mp4",
+  "segments": [
+    { "id": 0, "start": 2, "end": 6.5, "en": "A peaceful morning breaks over the meadow.", "zh": "宁静的清晨降临在草地上。" },
+    { "id": 1, "start": 6.5, "end": 11, "en": "A butterfly drifts between the flowers.", "zh": "一只蝴蝶在花丛间飞舞。" },
+    { "id": 2, "start": 11, "end": 16, "en": "The big rabbit steps out of his burrow and stretches.", "zh": "大兔子走出洞穴，伸了个懒腰。" },
+    { "id": 3, "start": 16, "end": 21, "en": "He takes a deep breath of the fresh air.", "zh": "他深深吸了一口新鲜空气。" },
+    { "id": 4, "start": 21, "end": 26.5, "en": "Three little rodents are hiding in the tree above.", "zh": "三只小啮齿动物躲在上面的树里。" },
+    { "id": 5, "start": 26.5, "end": 32, "en": "They are planning something naughty.", "zh": "它们正在盘算着一些淘气的把戏。" },
+    { "id": 6, "start": 32, "end": 38, "en": "An apple falls, and the trouble begins.", "zh": "一个苹果掉了下来，麻烦开始了。" },
+    { "id": 7, "start": 38, "end": 45, "en": "Practice listening to each sentence, then repeat it aloud.", "zh": "逐句听，然后大声跟读。" }
+  ]
+}
