@@ -2,5 +2,12 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true
-  }
+  },
+  "exclude": [
+    "node_modules",
+    // HLS 分片也是 .ts 后缀，跟 TypeScript 撞了。不排掉的话 tsc 会把
+    // 几百个音频分片当源码编译，刷出一屏「File appears to be binary」。
+    "data",
+    "vocab"
+  ]
 }

@@ -1,11 +1,15 @@
 /**
  * 词典查询端点。ECDICT 是 63MB 的 CSV，常驻内存太重，
- * 所以一次请求把整部电影的词一起送来，流式扫一遍就够（实测一秒上下），
- * 结果由客户端连同字幕缓存一起落盘，之后不再需要词典文件。
+ * 所以一次请求把整部电影的词一起送来，流式扫一遍就够（实测一秒上下）。
+ *
+ * 注意结果并没有落盘：每打开一部片子都会重扫一遍 CSV。本机上无所谓，
+ * 但响应有 400 KB，走外网时它才是瓶颈——所以 sendJson 那边做了压缩。
  */
 const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
+
+const { sendJson } = require('./sendJson');
 
 const ROUTE_PREFIX = '/api/dict';
 const DICT_DIR = path.join(__dirname, '..', 'dict');
@@ -165,21 +169,23 @@ function parseSenses(translation) {
     .filter((sense) => sense.text);
 }
 
+/**
+ * CSV 里的 definition（英文释义）、pos（词性占比）、exchange（词形变化表）都不往外发。
+ * 界面上一处都没用到，但它们占了全片响应的四成——一部片子 1000 个词就是 260 KB，
+ * 在外网那点带宽下白等好几秒。要用的时候再加回来。
+ */
 function toEntry(fields) {
-  const [word, phonetic, definition, translation, pos, collins, oxford, tag, bnc, frq, exchange] = fields;
+  const [word, phonetic, , translation, , collins, oxford, tag, bnc, frq] = fields;
   return {
     word,
     phonetic: phonetic || '',
-    definition: definition || '',
     translation: translation || '',
     senses: parseSenses(translation),
-    pos: pos || '',
     collins: Number(collins) || 0,
     oxford: Number(oxford) || 0,
     tag: tag || '',
     bnc: Number(bnc) || 0,
-    frq: Number(frq) || 0,
-    exchange: exchange || ''
+    frq: Number(frq) || 0
   };
 }
 
@@ -468,18 +474,6 @@ async function fetchExamplesBatch(words, concurrency = 4) {
   );
 
   return results;
-}
-
-function sendJson(response, status, payload) {
-  const body = JSON.stringify(payload);
-  response.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Cache-Control': 'no-store'
-  });
-  response.end(body);
 }
 
 function readBody(request) {

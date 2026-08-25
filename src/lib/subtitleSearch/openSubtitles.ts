@@ -1,4 +1,4 @@
-import { devServerUrl } from '../devServerUrl';
+import { apiUrl, authHeaders } from '../api';
 
 /**
  * 请求一律走开发服务器上的代理（见 scripts/openSubtitlesProxy.js）：
@@ -70,7 +70,7 @@ function sortByRelevance(candidates: SubtitleCandidate[], query: string): Subtit
 }
 
 function proxyUrl(path: string): string {
-  return devServerUrl(`${ROUTE_PREFIX}${path}`);
+  return apiUrl(`${ROUTE_PREFIX}${path}`);
 }
 
 async function readJson(response: Response) {
@@ -89,7 +89,9 @@ export async function searchSubtitles(options: {
   const params = new URLSearchParams({ query: options.query, languages: options.language });
   if (options.year) params.set('year', options.year);
 
-  const payload = await readJson(await fetch(proxyUrl(`/search?${params}`)));
+  const payload = await readJson(
+    await fetch(proxyUrl(`/search?${params}`), { headers: await authHeaders() })
+  );
   const candidates = ((payload?.data as any[]) || [])
     .map((item, index): SubtitleCandidate | null => {
       const attributes = item?.attributes;
@@ -180,7 +182,7 @@ export async function downloadSubtitle(options: { fileId: number }): Promise<Dow
   const payload = await readJson(
     await fetch(proxyUrl('/download'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
       body: JSON.stringify({ file_id: options.fileId })
     })
   );

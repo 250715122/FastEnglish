@@ -1,7 +1,9 @@
 import { VideoView, type VideoPlayer } from 'expo-video';
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import type { AudioTrack } from '../hooks/useAudioTrack';
 import type { Segment } from '../types/subtitle';
+import { ListenStage } from './ListenStage';
 import { SubtitleOverlay } from './SubtitleOverlay';
 
 type Props = {
@@ -9,10 +11,38 @@ type Props = {
   hasSource: boolean;
   currentSegment?: Segment;
   showChinese: boolean;
+  /** 听模式下不放画面，这块地方缩成一条台词卡，高度让给下面的台词列表 */
+  listenMode: boolean;
+  audio: AudioTrack;
+  /** 换个地址把音轨重挂一遍，只有听模式用得上，见 ListenStage */
+  onReloadAudio: () => void;
+  onExitListen: () => void;
 };
 
 /** 只负责画面和字幕层，播放控制在 PlaybackBar，这样画面能占满剩余空间。 */
-export function VideoStage({ player, hasSource, currentSegment, showChinese }: Props) {
+export function VideoStage({
+  player,
+  hasSource,
+  currentSegment,
+  showChinese,
+  listenMode,
+  audio,
+  onReloadAudio,
+  onExitListen
+}: Props) {
+  if (listenMode) {
+    return (
+      <ListenStage
+        player={player}
+        segment={currentSegment}
+        showChinese={showChinese}
+        audio={audio}
+        onReload={onReloadAudio}
+        onExit={onExitListen}
+      />
+    );
+  }
+
   return (
     <View style={styles.stage}>
       {hasSource ? (

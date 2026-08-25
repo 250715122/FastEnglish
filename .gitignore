@@ -45,15 +45,34 @@ yarn-error.*
 # Without these entries, `git add .` fails with "does not have a commit checked out".
 .brv/
 
+# 下面这些都是仓库根目录下的运行期数据目录，一律带上开头的斜杠。
+# 不带斜杠的 subtitles/ 会匹配任意层级的同名目录，
+# 把 src/lib/subtitles/ 那几个解析器源文件也一起排除掉。
+
 # 本地片源，动辄几个 GB，不要进仓库
-video/
+/video/
 
 # 词典数据，用 npm run fetch-dict 拉取
-dict/
+/dict/
 
 # 下载来的字幕是第三方版权内容，也暴露看过哪些片，留在本机就好
-subtitles/
+/subtitles/
 
 # 个人学习记录：已掌握的词、收藏的句子、自己写的注释。
 # 目录由开发服务器按需创建，克隆下来不影响运行
-vocab/
+/vocab/
+
+# 用户数据库：账号、密码哈希、所有人的学习记录，绝对不能进仓库。
+# 用户上传的片子也在这儿（data/uploads/<用户 id>/）
+/data/
+
+# 没配 MOVIE_ROOT 时的默认片库，把视频拖进来就能在应用里看到
+/media/
+
+# 排查问题时的临时产物：一次性脚本、截图、抓下来的响应体、
+# ffmpeg 试切片留下的碎片。留在本机方便回看，但不该进仓库，
+# 不排掉的话 git status 会被几十个文件淹没，真正的改动反而看不见。
+/tmp-*
+/shot-*.png
+/funnel-body.txt
+/init.mp4

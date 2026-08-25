@@ -1,16 +1,26 @@
 import React from 'react';
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Select } from './Select';
 
 type Props = {
   onPrevious: () => void;
   onNext: () => void;
   onRepeat: () => void;
+  /** 念一句台词时用片子自己的声音还是合成音 */
+  voice: 'original' | 'synth';
+  onSelectVoice: (voice: 'original' | 'synth') => void;
+  /** 没选片源时原声无从谈起，开关照常能点，但要说明为什么听到的是合成音 */
+  voiceAvailable: boolean;
+  /** 合成音的语速，原片的播放速度不受它影响 */
+  synthRate: number;
+  onCycleSynthRate: () => void;
+  /** 合成音档下按播放键会逐句念下去，念着的时候要给一条看得见的退路 */
+  reading: boolean;
+  onStopReading: () => void;
   loopMode: 'sentence' | 'range' | null;
   /** 圈定后的段首段尾，点一下能跳过去确认范围；只设了段首时 end 为 null */
   loopRange: { startLabel: string; endLabel: string | null; count: number } | null;
   onToggleLoop: () => void;
-  onMarkLoopStart: () => void;
-  onMarkLoopEnd: () => void;
   onClearLoop: () => void;
   onReplayLoop: () => void;
   onJumpToLoopStart: () => void;
@@ -21,6 +31,13 @@ type Props = {
   onOffsetChange: (delta: number) => void;
   hasSegments: boolean;
   hasCurrent: boolean;
+  listenMode: boolean;
+  /** 后端在局域网外面：默认就落在听模式，下拉里要说清楚为什么 */
+  remote: boolean;
+  /** null 表示这个片源抽不了音轨（本机选的文件、粘的网址），听模式要禁用 */
+  onSelectListen: ((listen: boolean) => void) | null;
+  onOpenReader: () => void;
+  onOpenDictation: () => void;
 };
 
 function Button({
@@ -69,11 +86,16 @@ export function PlaybackBar({
   onPrevious,
   onNext,
   onRepeat,
+  voice,
+  onSelectVoice,
+  voiceAvailable,
+  synthRate,
+  onCycleSynthRate,
+  reading,
+  onStopReading,
   loopMode,
   loopRange,
   onToggleLoop,
-  onMarkLoopStart,
-  onMarkLoopEnd,
   onClearLoop,
   onReplayLoop,
   onJumpToLoopStart,
@@ -83,15 +105,45 @@ export function PlaybackBar({
   offset,
   onOffsetChange,
   hasSegments,
-  hasCurrent
+  hasCurrent,
+  listenMode,
+  remote,
+  onSelectListen,
+  onOpenReader,
+  onOpenDictation
 }: Props) {
+  // 原声要有片源，没有的时候开关还是原声档，但实际发出来的是合成音，得挑明
+  const fallenBack = voice === 'original' && !voiceAvailable;
+
   return (
     <View style={styles.wrapper}>
       <View style={styles.bar}>
       <View style={styles.group}>
         <Button label="上一句" hint="←" onPress={onPrevious} disabled={!hasSegments} />
+        {/* 一律是合成音念给你听。原声重听没丢：原声档下双击那一行就从这句开始放原片 */}
         <Button label="跟读" hint="R" onPress={onRepeat} disabled={!hasCurrent} primary />
         <Button label="下一句" hint="→" onPress={onNext} disabled={!hasSegments} />
+      </View>
+
+      {/* 管的是双击台词、上/下一句和收藏连播用谁的声音：片子里的真人语调，还是能压慢、吐字清楚的合成音 */}
+      <View style={styles.group}>
+        <Text style={styles.offsetLabel}>发音</Text>
+        <Select
+          value={voice}
+          onChange={onSelectVoice}
+          options={[
+            { value: 'original', label: '原声', hint: voiceAvailable ? '片中真人语调' : '未选片源' },
+            { value: 'synth', label: '合成音', hint: '吐字清楚，能压慢' }
+          ]}
+        />
+        {/* 原片是几倍速就几倍速，能调的只有合成音，所以原声档下没这个按钮 */}
+        {voice === 'synth' ? <Button label={`语速 ${synthRate}x`} onPress={onCycleSynthRate} /> : null}
+        {reading ? (
+          <Button label="■ 停止朗读" onPress={onStopReading} active />
+        ) : voice === 'synth' && hasSegments ? (
+          <Text style={styles.voiceNote}>按播放键从选中处逐句念</Text>
+        ) : null}
+        {fallenBack ? <Text style={styles.voiceNote}>未选片源，暂用合成音</Text> : null}
       </View>
 
       <View style={styles.group}>
@@ -102,9 +154,41 @@ export function PlaybackBar({
           active={loopMode === 'sentence'}
           disabled={!hasSegments}
         />
-        <Button label="段首" hint="[" onPress={onMarkLoopStart} active={loopMode === 'range'} disabled={!hasSegments} />
-        <Button label="段尾" hint="]" onPress={onMarkLoopEnd} active={loopMode === 'range'} disabled={!hasSegments} />
+        {/* 段首段尾只留在台词行上：圈一段总要先找到那两句，在行上点比来回跑到这儿快得多 */}
         <Button label={showChinese ? '中文 开' : '中文 关'} hint="C" onPress={onToggleChinese} active={showChinese} />
+      </View>
+
+      {/*
+        四种用法收在一个下拉里：看和听是原地换个放法，读和写会盖上来占满整屏。
+        虽然行为不一样，但对着用户脑子里的那句「我现在想干什么」，它们是同一组选择。
+      */}
+      <View style={styles.group}>
+        <Text style={styles.offsetLabel}>模式</Text>
+        <Select
+          value={listenMode ? 'listen' : 'watch'}
+          onChange={(next) => {
+            if (next === 'watch') onSelectListen?.(false);
+            else if (next === 'listen') onSelectListen?.(true);
+            else if (next === 'read') onOpenReader();
+            else onOpenDictation();
+          }}
+          options={[
+            {
+              value: 'watch',
+              label: '看模式',
+              // 在外网点这个是要真金白银的流量，先把代价摆出来
+              hint: remote ? '画面 + 台词，一小时 2 GB' : '画面 + 台词'
+            },
+            {
+              value: 'listen',
+              label: '听模式',
+              hint: !onSelectListen ? '需片库里的片子' : remote ? '只放音轨，一小时 29 MB' : '只放音轨',
+              disabled: !onSelectListen
+            },
+            { value: 'read', label: '读模式', hint: hasSegments ? '台词排成文章' : '需要字幕', disabled: !hasSegments },
+            { value: 'write', label: '写模式', hint: hasSegments ? '逐句默写' : '需要字幕', disabled: !hasSegments }
+          ]}
+        />
       </View>
 
       <View style={styles.group}>
@@ -138,7 +222,7 @@ export function PlaybackBar({
                   <Text style={styles.loopText}>共 {loopRange.count} 句</Text>
                 </>
               ) : (
-                <Text style={styles.loopHint}>播到结尾处按 ] 圈定</Text>
+                <Text style={styles.loopHint}>在结尾那句上点「段尾」圈定</Text>
               )}
             </View>
           )}
@@ -271,5 +355,9 @@ const styles = StyleSheet.create({
     color: '#555',
     minWidth: 46,
     textAlign: 'center'
+  },
+  voiceNote: {
+    fontSize: 11,
+    color: '#b0843f'
   }
 });

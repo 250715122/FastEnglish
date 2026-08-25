@@ -1,5 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from 'react-native';
 import { formatTime } from '../lib/formatTime';
 import type { Segment } from '../types/subtitle';
 
@@ -23,7 +31,11 @@ export function NoteEditor({ segment, index, initialText, onSave, onClose }: Pro
   };
 
   return (
-    <View style={styles.backdrop}>
+    // 卡片是垂直居中的，autoFocus 一弹键盘就正好把它盖住，得整体上移
+    <KeyboardAvoidingView
+      style={styles.backdrop}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       {/* 点周围空白关掉，手机上比找按钮快 */}
       <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />
 
@@ -64,7 +76,7 @@ export function NoteEditor({ segment, index, initialText, onSave, onClose }: Pro
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

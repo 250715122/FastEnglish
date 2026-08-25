@@ -34,12 +34,28 @@ const MAX_ENTRIES = 50_000;
 
 let cache = { root: null, at: 0, videos: new Map(), sidecars: [] };
 
+/**
+ * 没配 MOVIE_ROOT 时的落脚点。
+ * 早先没配就等于「片库功能不存在」，结果新用户登录进来一片空白、无从下手。
+ * 现在给个默认目录并自动建出来，把文件拖进去就能看见。
+ */
+const DEFAULT_ROOT = path.join(__dirname, '..', 'media');
+
 function movieRoot() {
-  // 延迟到用调用时才读，避免早于 Expo 载入 .env
+  // 延迟到调用时才读，避免早于 Expo 载入 .env
   const configured = (process.env.MOVIE_ROOT || '').trim();
-  if (!configured) return null;
+
+  if (configured) {
+    try {
+      return fs.statSync(configured).isDirectory() ? path.resolve(configured) : null;
+    } catch {
+      return null;
+    }
+  }
+
   try {
-    return fs.statSync(configured).isDirectory() ? path.resolve(configured) : null;
+    fs.mkdirSync(DEFAULT_ROOT, { recursive: true });
+    return DEFAULT_ROOT;
   } catch {
     return null;
   }
@@ -111,6 +127,11 @@ function listSidecarFiles() {
   return currentIndex().sidecars;
 }
 
+/** 电影库里的全部视频，供片库列表用；扫描结果已带缓存，不必自己再遍历一遍 */
+function listVideoFiles() {
+  return [...currentIndex().videos].map(([name, full]) => ({ name, path: full }));
+}
+
 function isConfigured() {
   return Boolean(movieRoot());
 }
@@ -123,7 +144,9 @@ function invalidate() {
 module.exports = {
   findVideoPath,
   listSidecarFiles,
+  listVideoFiles,
   isConfigured,
+  DEFAULT_ROOT,
   invalidate,
   movieRoot,
   SIDECAR_SUFFIX,

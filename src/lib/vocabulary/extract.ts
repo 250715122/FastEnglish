@@ -37,7 +37,7 @@ const SKIP_TAGS = [
   'Conditional'
 ];
 
-const POS_PRIORITY: WordPos[] = ['Verb', 'Noun', 'Adjective', 'Adverb'];
+const POS_PRIORITY: NonNullable<WordPos>[] = ['Verb', 'Noun', 'Adjective', 'Adverb'];
 
 function pickPos(tags: string[]): WordPos {
   for (const pos of POS_PRIORITY) {

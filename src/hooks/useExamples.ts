@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { devServerUrl } from '../lib/devServerUrl';
+import { apiUrl, authHeaders } from '../lib/api';
 
 export type WordExamples = {
   word: string;
@@ -20,17 +20,23 @@ export function useExamples(words: string[]) {
     for (const word of missing) requested.current.add(word);
 
     let cancelled = false;
-    fetch(devServerUrl('/api/dict/examples'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ words: missing })
-    })
-      .then((response) => (response.ok ? response.json() : { examples: {} }))
-      .then((payload) => {
+    (async () => {
+      try {
+        const response = await fetch(apiUrl('/api/dict/examples'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+          body: JSON.stringify({ words: missing })
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        const payload = await response.json();
         if (cancelled) return;
         setExamples((previous) => ({ ...previous, ...payload.examples }));
-      })
-      .catch(() => undefined);
+      } catch {
+        // 没查成就把标记撤掉，否则这几个词这一整轮会话都不会再试。
+        // 令牌还没读出来时的那一次 401 尤其不该是永久的。
+        for (const word of missing) requested.current.delete(word);
+      }
+    })();
 
     return () => {
       cancelled = true;

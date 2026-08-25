@@ -1,24 +1,21 @@
+/**
+ * 后端接口已经拆到 server/ 独立跑（npm run server），不再寄生在这里。
+ * 之前挂在这个文件上的四个中间件如果留着，会和后端同时读写同一批文件。
+ */
+const path = require('node:path');
 const { getDefaultConfig } = require('expo/metro-config');
-const { createDictStoreMiddleware } = require('./scripts/dictStore');
-const { createOpenSubtitlesMiddleware } = require('./scripts/openSubtitlesProxy');
-const { createSubtitleStoreMiddleware } = require('./scripts/subtitleStore');
-const { createVocabStoreMiddleware } = require('./scripts/vocabStore');
 
 const config = getDefaultConfig(__dirname);
-const middlewares = [
-  createOpenSubtitlesMiddleware(),
-  createSubtitleStoreMiddleware(),
-  createDictStoreMiddleware(),
-  createVocabStoreMiddleware()
-];
 
-config.server = {
-  ...config.server,
-  enhanceMiddleware: (metroMiddleware) => (request, response, next) =>
-    middlewares.reduceRight(
-      (downstream, middleware) => () => middleware(request, response, downstream),
-      () => metroMiddleware(request, response, next)
-    )()
-};
+/**
+ * data/ 是后端的地盘：数据库、抽出来的音轨、HLS 分片，没有一样是前端要打包的。
+ *
+ * 必须挡掉，不然有两个麻烦：HLS 分片是 .ts 后缀，跟 TypeScript 撞名，Metro 会
+ * 当源码去解析；而且一部片子切出近八百个分片，白白压在文件监听上。
+ */
+const blocked = new RegExp(`^${path.join(__dirname, 'data').replace(/\\/g, '\\\\')}\\b.*`);
+config.resolver.blockList = config.resolver.blockList
+  ? [config.resolver.blockList, blocked].flat()
+  : blocked;
 
 module.exports = config;

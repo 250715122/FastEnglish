@@ -3,21 +3,11 @@
  * 而浏览器又禁止 JS 修改 User-Agent，所以网页端只能由开发服务器代为转发。
  * 顺带好处：API key 只存在于服务端进程，不会被打进客户端 bundle。
  */
+const { sendJson } = require('./sendJson');
+
 const API_BASE = 'https://api.opensubtitles.com/api/v1';
 const USER_AGENT = 'FastEnglish v1.0';
 const ROUTE_PREFIX = '/api/opensubtitles';
-
-function sendJson(response, status, payload) {
-  const body = JSON.stringify(payload);
-  response.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Cache-Control': 'no-store'
-  });
-  response.end(body);
-}
 
 function readBody(request) {
   return new Promise((resolve, reject) => {

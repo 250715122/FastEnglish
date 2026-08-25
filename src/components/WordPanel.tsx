@@ -14,6 +14,8 @@ type Props = {
   currentIndex: number;
   words: StudyWord[];
   status: VocabularyStatus;
+  /** 查询失败时的具体原因，比干巴巴一句「失败了」有用 */
+  error?: string | null;
   level: DifficultyLevel;
   onLevelChange: (level: DifficultyLevel) => void;
   showMastered: boolean;
@@ -21,7 +23,11 @@ type Props = {
   isMastered: (key: string) => boolean;
   onToggleMastered: (key: string) => void;
   onSpeak: (segment: Segment) => void;
+  /** 单词、短语、词典例句都没有对应的画面可跳，只能靠合成语音念出来 */
+  onSpeakText: (text: string) => void;
   onJump: (index: number) => void;
+  /** 用片子原声放某一句。没片源可放时不传，词条里跟着不出现这个按钮 */
+  onPlayOriginal?: (index: number) => void;
   onOpenWordbook: () => void;
   phrases: PhraseHit[];
   stacked?: boolean;
@@ -38,7 +44,7 @@ const STATUS_HINT: Record<VocabularyStatus, string | null> = {
   'no-english': '这份字幕只有中文，没有英文原文就没法拆出单词。再加载一份英文字幕试试。',
   loading: '正在查词典…',
   ready: null,
-  missing: '词典还没下载。在项目目录运行 npm run fetch-dict，然后重启开发服务器。',
+  missing: '词典还没下载。在项目目录运行 npm run fetch-dict，然后重启后端。',
   error: '词典查询失败了。'
 };
 
@@ -48,6 +54,7 @@ export function WordPanel({
   currentIndex,
   words,
   status,
+  error,
   level,
   onLevelChange,
   showMastered,
@@ -55,7 +62,9 @@ export function WordPanel({
   isMastered,
   onToggleMastered,
   onSpeak,
+  onSpeakText,
   onJump,
+  onPlayOriginal,
   onOpenWordbook,
   phrases,
   stacked
@@ -101,7 +110,12 @@ export function WordPanel({
             {phrases.map((item) => (
               <View key={`${item.phrase}-${item.start}`} style={styles.phraseCard}>
                 <View style={styles.phraseHead}>
-                  <Text style={styles.phraseText}>{item.phrase}</Text>
+                  <TouchableOpacity onPress={() => onSpeakText(item.phrase)} hitSlop={6} activeOpacity={0.6}>
+                    <Text style={styles.phraseText}>{item.phrase}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => onSpeakText(item.phrase)} hitSlop={8} activeOpacity={0.6}>
+                    <Text style={styles.phraseSpeak}>🔊</Text>
+                  </TouchableOpacity>
                   {item.phonetic ? <Text style={styles.phrasePhonetic}>/{item.phonetic}/</Text> : null}
                 </View>
                 {/* 词典里多个义项是用字面的 \n 分隔的 */}
@@ -127,6 +141,7 @@ export function WordPanel({
         </View>
 
         {hint ? <Text style={styles.placeholder}>{hint}</Text> : null}
+        {status === 'error' && error ? <Text style={styles.placeholder}>{error}</Text> : null}
 
         {status === 'ready' && !words.length && segment?.en ? (
           <Text style={styles.placeholder}>这句里没有需要特别学的词，换个难度试试。</Text>
@@ -142,6 +157,8 @@ export function WordPanel({
             examples={examples[word.key]}
             onToggleMastered={() => onToggleMastered(word.key)}
             onJump={onJump}
+            onSpeak={onSpeakText}
+            onPlayOriginal={onPlayOriginal}
           />
         ))}
 
@@ -267,6 +284,10 @@ const styles = StyleSheet.create({
   phraseText: {
     fontSize: 15,
     fontWeight: '600',
+    color: '#8a5a12'
+  },
+  phraseSpeak: {
+    fontSize: 12,
     color: '#8a5a12'
   },
   phrasePhonetic: {

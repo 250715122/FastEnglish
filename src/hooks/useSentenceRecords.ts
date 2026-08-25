@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { devServerUrl } from '../lib/devServerUrl';
+import { useCallback, useEffect, useState } from 'react';
+import { api } from '../lib/api';
 
 /** 收藏和注释记的是同一件事：某部片的某一句，外加当时的原文和时间点 */
 export type SentenceRecord = {
@@ -19,51 +19,81 @@ export function recordId(videoKey: string, index: number) {
   return `${videoKey}#${index}`;
 }
 
+/** 片名里可能带 #，所以从右边找分隔符 */
+function splitId(id: string): { videoKey: string; index: number } | null {
+  const at = id.lastIndexOf('#');
+  if (at < 0) return null;
+  const index = Number(id.slice(at + 1));
+  if (!Number.isInteger(index)) return null;
+  return { videoKey: id.slice(0, at), index };
+}
+
 /**
- * 读写这类记录的公共部分。写盘攒一下再发：改注释是连着敲字的，
- * 每敲一下发一次请求既费劲也容易把顺序搞乱。
+ * 读写这类记录的公共部分。
+ *
+ * 以前是把整份列表发上去覆盖，多用户下会互相抹掉——两个人同时收藏，
+ * 后提交的那份里没有对方刚加的那条，对方的就没了。现在改成一条一条地增删，
+ * 服务端按 (用户, 片子, 句子下标) 做唯一约束。
  */
-export function useSentenceRecords<T extends SentenceRecord>(endpoint: string) {
+export function useSentenceRecords<T extends SentenceRecord>(
+  endpoint: string,
+  userId: number | null
+) {
   const [items, setItems] = useState<T[]>([]);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const reload = useCallback(async () => {
+    if (!userId) {
+      setItems([]);
+      return;
+    }
+    try {
+      const payload = await api<{ items: T[] }>(endpoint);
+      setItems(Array.isArray(payload.items) ? payload.items : []);
+    } catch {
+      setItems([]);
+    }
+  }, [endpoint, userId]);
+
+  // 换用户就得整份换掉，否则会看到上一个人的记录
   useEffect(() => {
-    fetch(devServerUrl(endpoint))
-      .then((response) => (response.ok ? response.json() : { items: [] }))
-      .then((payload) => setItems(Array.isArray(payload.items) ? payload.items : []))
-      .catch(() => undefined);
-  }, [endpoint]);
+    reload();
+  }, [reload]);
 
-  const persist = useCallback(
-    (next: T[]) => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => {
-        fetch(devServerUrl(endpoint), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: next })
-        }).catch(() => undefined);
-      }, 500);
-    },
-    [endpoint]
-  );
-
-  /** 所有改动都走这里，保证内存和待写盘的内容始终一致 */
-  const update = useCallback(
-    (change: (previous: T[]) => T[]) => {
+  /**
+   * 先改本地再发请求，点下去立刻有反馈；失败了从服务端拉回真实状态，
+   * 免得界面显示的和实际存下的不一致。
+   */
+  const upsert = useCallback(
+    async (record: T) => {
       setItems((previous) => {
-        const next = change(previous);
-        persist(next);
-        return next;
+        const rest = previous.filter((item) => item.id !== record.id);
+        return [record, ...rest];
       });
+      try {
+        await api(endpoint, { method: 'PUT', body: record });
+      } catch {
+        reload();
+      }
     },
-    [persist]
+    [endpoint, reload]
   );
 
-  const remove = useCallback(
-    (id: string) => update((previous) => previous.filter((item) => item.id !== id)),
-    [update]
+  const removeById = useCallback(
+    async (id: string) => {
+      const parts = splitId(id);
+      setItems((previous) => previous.filter((item) => item.id !== id));
+      if (!parts) return;
+      try {
+        await api(
+          `${endpoint}?videoKey=${encodeURIComponent(parts.videoKey)}&index=${parts.index}`,
+          { method: 'DELETE' }
+        );
+      } catch {
+        reload();
+      }
+    },
+    [endpoint, reload]
   );
 
-  return { items, update, remove };
+  return { items, upsert, remove: removeById, reload };
 }

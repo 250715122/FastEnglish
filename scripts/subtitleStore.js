@@ -16,23 +16,12 @@ const {
   SIDECAR_SUFFIX
 } = require('./movieIndex');
 const { segmentsToSrt } = require('./srt');
+const { sendJson } = require('./sendJson');
 
 const ROUTE_PREFIX = '/api/subtitles';
 const STORE_DIR = path.join(__dirname, '..', 'subtitles');
 /** 双语 srt 单独取名，免得盖掉片源自带的 xxx.srt */
 const SIDECAR_SRT_SUFFIX = '.zh-en.srt';
-
-function sendJson(response, status, payload) {
-  const body = JSON.stringify(payload);
-  response.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Cache-Control': 'no-store'
-  });
-  response.end(body);
-}
 
 function readBody(request) {
   return new Promise((resolve, reject) => {

@@ -1,46 +1,54 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { devServerUrl } from '../lib/devServerUrl';
+import { useCallback, useEffect, useState } from 'react';
+import { api } from '../lib/api';
 
 /**
  * 已掌握的词全局共享，不分电影。
- * 勾选往往是连着点好几个，攒一下再写盘。
+ *
+ * 和收藏一样改成了一次一个词：勾选是连着点的，整份列表覆盖在多用户下
+ * 会互相冲掉，而单个词的增删天然幂等。
  */
-export function useMastery() {
+export function useMastery(userId: number | null) {
   const [mastered, setMastered] = useState<Set<string>>(new Set());
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!userId) {
+      setMastered(new Set());
+      return;
+    }
+    try {
+      const payload = await api<{ words: string[] }>('/api/vocab/mastery');
+      setMastered(new Set(payload.words ?? []));
+    } catch {
+      setMastered(new Set());
+    }
+  }, [userId]);
 
   useEffect(() => {
-    fetch(devServerUrl('/api/vocab/mastery'))
-      .then((response) => (response.ok ? response.json() : { words: [] }))
-      .then((payload) => setMastered(new Set(payload.words ?? [])))
-      .catch(() => undefined);
-  }, []);
-
-  const persist = useCallback((words: Set<string>) => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      fetch(devServerUrl('/api/vocab/mastery'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ words: [...words] })
-      }).catch(() => undefined);
-    }, 600);
-  }, []);
+    reload();
+  }, [reload]);
 
   const toggle = useCallback(
     (key: string) => {
+      const word = key.toLowerCase();
+      // 不能在 setState 的更新函数里算这个值：React 可能延后执行它，
+      // 等发请求时读到的还是上一轮的结果
+      const nextMastered = !mastered.has(word);
+
       setMastered((previous) => {
         const next = new Set(previous);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        persist(next);
+        if (nextMastered) next.add(word);
+        else next.delete(word);
         return next;
       });
+
+      api('/api/vocab/mastery', { method: 'PUT', body: { word, mastered: nextMastered } }).catch(
+        () => reload()
+      );
     },
-    [persist]
+    [mastered, reload]
   );
 
-  const isMastered = useCallback((key: string) => mastered.has(key), [mastered]);
+  const isMastered = useCallback((key: string) => mastered.has(key.toLowerCase()), [mastered]);
 
-  return { isMastered, toggle, masteredCount: mastered.size, mastered };
+  return { isMastered, toggle, masteredCount: mastered.size, mastered, reload };
 }

@@ -8,8 +8,13 @@ type Loop = { mode: 'sentence' | 'range'; start: number; end: number | null } | 
 type Props = {
   segments: Segment[];
   activeIndex: number;
+  /** 单击选中、准备细看的那句；null 表示跟着播放走 */
+  selectedIndex?: number | null;
   loop?: Loop;
+  /** 单击：只把这句送到右侧讲解，不动画面 */
   onSelect: (segment: Segment, index: number) => void;
+  /** 双击：跳过去播 */
+  onActivate: (segment: Segment, index: number) => void;
   onSpeak: (segment: Segment) => void;
   onLoopFrom: (index: number) => void;
   onLoopTo: (index: number) => void;
@@ -88,8 +93,10 @@ function stopRowPress(action: () => void) {
 export function SegmentList({
   segments,
   activeIndex,
+  selectedIndex,
   loop,
   onSelect,
+  onActivate,
   onSpeak,
   onLoopFrom,
   onLoopTo,
@@ -103,10 +110,28 @@ export function SegmentList({
 }: Props) {
   const listRef = useRef<FlatList<Segment>>(null);
 
+  // 挑中一句在看时别再跟着播放自动滚，正读着的行被滚走比什么都烦
   useEffect(() => {
-    if (activeIndex < 0) return;
+    if (activeIndex < 0 || selectedIndex != null) return;
     listRef.current?.scrollToIndex({ index: activeIndex, viewPosition: 0.5, animated: true });
-  }, [activeIndex]);
+  }, [activeIndex, selectedIndex]);
+
+  /**
+   * 平台没有现成的双击事件，只能自己按间隔判。第一下照常立即选中，
+   * 第二下再补跳转——先选后跳没有副作用，比压着 300ms 等判定完再响应跟手。
+   */
+  const lastTapRef = useRef({ index: -1, at: 0 });
+  const handleRowPress = (item: Segment, index: number) => {
+    const now = Date.now();
+    const previous = lastTapRef.current;
+    if (previous.index === index && now - previous.at < 320) {
+      lastTapRef.current = { index: -1, at: 0 };
+      onActivate(item, index);
+      return;
+    }
+    lastTapRef.current = { index, at: now };
+    onSelect(item, index);
+  };
 
   return (
     <FlatList
@@ -125,6 +150,7 @@ export function SegmentList({
       }}
       renderItem={({ item, index }) => {
         const active = index === activeIndex;
+        const selected = index === selectedIndex;
         const row = rowLoopInfo(loop ?? null, index);
         const favorited = isFavorite?.(index) ?? false;
         const note = noteAt?.(index) ?? null;
@@ -140,13 +166,17 @@ export function SegmentList({
               row.inLoop && styles.rowInLoop,
               row.position === 'start' && styles.rowRangeStart,
               row.position === 'end' && styles.rowRangeEnd,
-              active && styles.rowActive
+              active && styles.rowActive,
+              selected && styles.rowSelected
             ]}
-            onPress={() => onSelect(item, index)}
+            onPress={() => handleRowPress(item, index)}
             activeOpacity={0.7}
           >
             <View style={styles.rowHeader}>
-              <Text style={[styles.time, active && styles.timeActive]}>{formatTime(item.start)}</Text>
+              <View style={styles.rowHeaderLeft}>
+                <Text style={[styles.time, active && styles.timeActive]}>{formatTime(item.start)}</Text>
+                {selected ? <Text style={styles.selectedMark}>讲解中</Text> : null}
+              </View>
               <View style={styles.rowHeaderRight}>
                 {row.badge ? <Text style={styles.loopMark}>{row.badge}</Text> : null}
                 {/* 行内按钮各管各的：点它们不该顺带把播放位置也拽过去 */}
@@ -172,6 +202,7 @@ export function SegmentList({
                     {row.rangeLabel}
                   </Text>
                 </TouchableOpacity>
+                {/* 一律是合成音念这一句。想听原片就在原声档下双击整行，从这句开始接着放 */}
                 <TouchableOpacity onPress={stopRowPress(() => onSpeak(item))} hitSlop={8}>
                   <Text style={styles.repeat}>跟读</Text>
                 </TouchableOpacity>
@@ -193,6 +224,8 @@ export function SegmentList({
                 <Text style={styles.noteText}>{note}</Text>
               </TouchableOpacity>
             ) : null}
+            {/* 点了却没跳，得当场说清楚怎么跳，不然只会以为点坏了 */}
+            {selected ? <Text style={styles.playHint}>再点一下只放这一句 · 按播放键从这儿连着放</Text> : null}
           </TouchableOpacity>
         );
       }}
@@ -219,6 +252,11 @@ const styles = StyleSheet.create({
     borderColor: '#2f80ed',
     backgroundColor: '#eef4ff'
   },
+  rowSelected: {
+    borderColor: '#2f80ed',
+    borderWidth: 2,
+    backgroundColor: '#f5f9ff'
+  },
   rowInLoop: {
     backgroundColor: '#f1faf3',
     borderColor: '#cfe9d8',
@@ -240,6 +278,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 6,
     gap: 8
+  },
+  rowHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  selectedMark: {
+    fontSize: 11,
+    color: '#2f80ed',
+    fontWeight: '600'
+  },
+  playHint: {
+    marginTop: 6,
+    fontSize: 11,
+    color: '#8aa9d8'
   },
   rowHeaderRight: {
     flexDirection: 'row',

@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Favorite } from '../hooks/useFavorites';
 import type { Note } from '../hooks/useNotes';
 import type { SentenceRecord } from '../hooks/useSentenceRecords';
+import { useSentenceQueue } from '../hooks/useSentenceQueue';
 import { formatTime } from '../lib/formatTime';
 
 export type MarksTab = 'favorites' | 'notes';
@@ -18,8 +20,29 @@ type Props = {
   onRemoveFavorite: (id: string) => void;
   onRemoveNote: (id: string) => void;
   onEditNote: (note: Note) => void;
+  voice: 'original' | 'synth';
+  onSelectVoice: (voice: 'original' | 'synth') => void;
+  /** 合成音的语速，跟台词列表共用一份设置 */
+  synthRate: number;
+  onCycleSynthRate: () => void;
+  /** 原声得有片源，所以只有当前这部片的记录放得出来，其余的只能退回合成音 */
+  canPlayOriginal: (record: SentenceRecord) => boolean;
+  /** 放一句，返回的 Promise 在这句放完时兑现，串着放要靠它接龙 */
+  onPlay: (record: SentenceRecord) => Promise<void>;
+  onStopPlay: () => void;
   onClose: () => void;
 };
+
+/**
+ * 网页端的嵌套 Touchable 靠 DOM 事件冒泡，卡片里的按钮不拦一下，
+ * 点「朗读」会连带触发整张卡片的跳转，直接退出这个界面跑回视频去。
+ */
+function stopCardPress(action: () => void) {
+  return (event?: { stopPropagation?: () => void }) => {
+    event?.stopPropagation?.();
+    action();
+  };
+}
 
 function describeTime(timestamp: number): string {
   const minutes = Math.floor((Date.now() - timestamp) / 60000);
@@ -49,10 +72,19 @@ export function MarksScreen({
   onRemoveFavorite,
   onRemoveNote,
   onEditNote,
+  voice,
+  onSelectVoice,
+  synthRate,
+  onCycleSynthRate,
+  canPlayOriginal,
+  onPlay,
+  onStopPlay,
   onClose
 }: Props) {
   const [onlyThisVideo, setOnlyThisVideo] = useState(false);
   const isNotes = tab === 'notes';
+  const queue = useSentenceQueue<SentenceRecord>({ play: onPlay, stop: onStopPlay });
+  const insets = useSafeAreaInsets();
 
   const visible = useMemo(() => {
     const source: SentenceRecord[] = isNotes ? notes : favorites;
@@ -62,9 +94,21 @@ export function MarksScreen({
   }, [currentVideoKey, favorites, isNotes, notes, onlyThisVideo]);
 
   const videoCount = useMemo(() => new Set(visible.map((item) => item.videoKey)).size, [visible]);
+  const speakable = useMemo(() => visible.filter((item) => item.en), [visible]);
+
+  // 切标签、改筛选之后队列就对不上了，正放着的得先停下来
+  const listKey = `${tab}-${onlyThisVideo}-${voice}`;
+  const { stop: stopQueue } = queue;
+  useEffect(() => {
+    stopQueue();
+  }, [listKey, stopQueue]);
+
+  // 原声档下跨片的那些放不出原声，说清楚免得以为坏了
+  const wantsOriginal = voice === 'original';
+  const fallbackCount = wantsOriginal ? speakable.filter((item) => !canPlayOriginal(item)).length : 0;
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
       <View style={styles.head}>
         <TouchableOpacity onPress={onClose} hitSlop={8}>
           <Text style={styles.back}>← 返回</Text>
@@ -90,29 +134,75 @@ export function MarksScreen({
         </Text>
       </View>
 
-      {currentVideoKey ? (
-        <View style={styles.filters}>
+      <View style={styles.filters}>
+        {currentVideoKey ? (
+          <>
+            <TouchableOpacity
+              style={[styles.chip, !onlyThisVideo && styles.chipActive]}
+              onPress={() => setOnlyThisVideo(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.chipText, !onlyThisVideo && styles.chipTextActive]}>全部</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.chip, onlyThisVideo && styles.chipActive]}
+              onPress={() => setOnlyThisVideo(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.chipText, onlyThisVideo && styles.chipTextActive]}>只看当前这部</Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
+
+        <View style={styles.spacer} />
+
+        {/* 复习时听谁的：片子里的真人语调，还是不挑片源、跨片也能连着放的合成音 */}
+        <View style={styles.voice}>
           <TouchableOpacity
-            style={[styles.chip, !onlyThisVideo && styles.chipActive]}
-            onPress={() => setOnlyThisVideo(false)}
+            style={[styles.voiceOption, wantsOriginal && styles.voiceOptionOn]}
+            onPress={() => onSelectVoice('original')}
             activeOpacity={0.7}
           >
-            <Text style={[styles.chipText, !onlyThisVideo && styles.chipTextActive]}>全部</Text>
+            <Text style={[styles.voiceText, wantsOriginal && styles.voiceTextOn]}>原声</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.chip, onlyThisVideo && styles.chipActive]}
-            onPress={() => setOnlyThisVideo(true)}
+            style={[styles.voiceOption, !wantsOriginal && styles.voiceOptionOn]}
+            onPress={() => onSelectVoice('synth')}
             activeOpacity={0.7}
           >
-            <Text style={[styles.chipText, onlyThisVideo && styles.chipTextActive]}>只看当前这部</Text>
+            <Text style={[styles.voiceText, !wantsOriginal && styles.voiceTextOn]}>合成音</Text>
           </TouchableOpacity>
         </View>
+
+        {wantsOriginal ? null : (
+          <TouchableOpacity style={styles.chip} onPress={onCycleSynthRate} activeOpacity={0.7}>
+            <Text style={styles.chipText}>语速 {synthRate}x</Text>
+          </TouchableOpacity>
+        )}
+
+        {speakable.length ? (
+          <TouchableOpacity
+            style={[styles.play, queue.playingAll && styles.playOn]}
+            onPress={queue.playingAll ? queue.stop : () => queue.playAll(speakable)}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.playText, queue.playingAll && styles.playTextOn]}>
+              {queue.playingAll ? '■ 停止' : `▶ 连着放 ${speakable.length} 句`}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      {fallbackCount ? (
+        <Text style={styles.voiceNote}>
+          其中 {fallbackCount} 句属于别的片子，这里放不出原声，会用合成音念
+        </Text>
       ) : null}
 
       <FlatList
         data={visible}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: 24 + insets.bottom }]}
         ListEmptyComponent={
           <Text style={styles.empty}>
             {isNotes
@@ -124,8 +214,14 @@ export function MarksScreen({
           // 换片之后原来的视频地址已经失效，只能提示回到那部片再看
           const sameVideo = item.videoKey === currentVideoKey;
           const note = isNotes ? (item as Note) : null;
+          const speaking = queue.activeId === item.id;
+          const original = wantsOriginal && canPlayOriginal(item);
           return (
-            <TouchableOpacity style={styles.card} onPress={() => onJump(item)} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={[styles.card, speaking && styles.cardSpeaking]}
+              onPress={() => onJump(item)}
+              activeOpacity={0.7}
+            >
               <View style={styles.cardHead}>
                 <Text style={[styles.savedAt, isNotes && styles.savedAtNote]}>
                   {isNotes ? '记于 ' : '收藏于 '}
@@ -133,13 +229,21 @@ export function MarksScreen({
                 </Text>
                 <Text style={styles.savedExact}>{exactTime(item.savedAt)}</Text>
                 <View style={styles.spacer} />
+                {/* 卡片里的按钮各管各的：点它们不该顺带把人带回视频去 */}
+                {item.en ? (
+                  <TouchableOpacity onPress={stopCardPress(() => queue.playOne(item))} hitSlop={8}>
+                    <Text style={[styles.speak, speaking && styles.speakOn]}>
+                      {speaking ? '▶ 播放中' : original ? '▶ 原声' : '🔊 朗读'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
                 {note ? (
-                  <TouchableOpacity onPress={() => onEditNote(note)} hitSlop={8}>
+                  <TouchableOpacity onPress={stopCardPress(() => onEditNote(note))} hitSlop={8}>
                     <Text style={styles.edit}>编辑</Text>
                   </TouchableOpacity>
                 ) : null}
                 <TouchableOpacity
-                  onPress={() => (isNotes ? onRemoveNote(item.id) : onRemoveFavorite(item.id))}
+                  onPress={stopCardPress(() => (isNotes ? onRemoveNote(item.id) : onRemoveFavorite(item.id)))}
                   hitSlop={8}
                 >
                   <Text style={styles.remove}>{isNotes ? '删除' : '取消收藏'}</Text>
@@ -215,9 +319,27 @@ const styles = StyleSheet.create({
   },
   filters: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10
+  },
+  play: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 15,
+    backgroundColor: '#e4edff'
+  },
+  playOn: {
+    backgroundColor: '#b0483f'
+  },
+  playText: {
+    fontSize: 13,
+    color: '#2f80ed',
+    fontWeight: '600'
+  },
+  playTextOn: {
+    color: '#fff'
   },
   chip: {
     paddingHorizontal: 12,
@@ -235,6 +357,35 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: '#fff',
     fontWeight: '600'
+  },
+  // 两个选项贴在一起做成一个二选一的滑块，比两枚独立按钮更像开关
+  voice: {
+    flexDirection: 'row',
+    borderRadius: 14,
+    backgroundColor: '#eef1f5',
+    padding: 2
+  },
+  voiceOption: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12
+  },
+  voiceOptionOn: {
+    backgroundColor: '#fff'
+  },
+  voiceText: {
+    fontSize: 12,
+    color: '#888'
+  },
+  voiceTextOn: {
+    color: '#2f80ed',
+    fontWeight: '700'
+  },
+  voiceNote: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    fontSize: 11,
+    color: '#b0843f'
   },
   list: {
     paddingHorizontal: 16,
@@ -256,11 +407,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#eef1f5'
   },
+  // 念到哪句就把哪张卡片点亮，一串念下来才知道进行到哪儿了
+  cardSpeaking: {
+    borderColor: '#2f80ed',
+    backgroundColor: '#f5f9ff'
+  },
   cardHead: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 8
+  },
+  speak: {
+    fontSize: 12,
+    color: '#2f80ed'
+  },
+  speakOn: {
+    fontWeight: '700'
   },
   savedAt: {
     fontSize: 12,

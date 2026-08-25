@@ -1,5 +1,5 @@
 import type { Segment } from '../types/subtitle';
-import { devServerUrl } from './devServerUrl';
+import { apiUrl, authHeaders } from './api';
 
 /**
  * 字幕由开发服务器落盘（见 scripts/subtitleStore.js）：配了电影库就存到视频文件
@@ -19,7 +19,10 @@ export type CachedSubtitleMeta = {
 };
 
 async function request(path: string, init?: RequestInit) {
-  const response = await fetch(devServerUrl(`${ROUTE_PREFIX}${path}`), init);
+  const response = await fetch(apiUrl(`${ROUTE_PREFIX}${path}`), {
+    ...init,
+    headers: { ...(init?.headers as Record<string, string>), ...(await authHeaders()) }
+  });
   const payload = await response.json().catch(() => null);
   if (!response.ok) throw new Error(payload?.error || `请求失败（HTTP ${response.status}）`);
   return payload;
