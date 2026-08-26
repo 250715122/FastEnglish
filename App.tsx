@@ -761,6 +761,26 @@ function StudyApp({ user, sessions, onLogout, onChangePassword, onLogoutOthers }
   }, [cancelReadAloud, player, releaseOneShot, stopSpeech]);
 
   /**
+   * 把所有出声的东西一次收干净，离开这部片子时用。
+   *
+   * 跟 stopSaying 的区别在最后一行：那个只收自己起的一次性播放，用户自己
+   * 按着放的画面不动；这里是**无条件**停，因为人已经不在这部片子上了。
+   *
+   * 声音有四摊，少收一摊就会跟到下一部片子上去：播放器、朗读、念单词、
+   * 还有那个「放到某处就停」的约定。之前只切了界面，播放器留在原地接着响，
+   * 回列表挑了另一部还在放上一部的声音。
+   */
+  const stopEverything = useCallback(() => {
+    stopSpeech();
+    wordSessionRef.current += 1;
+    cancelReadAloud();
+    releaseOneShot();
+    player.pause();
+    // 循环圈的是这部片子的句子下标，换片之后指向的就是别的台词了
+    setLoop(null);
+  }, [cancelReadAloud, player, releaseOneShot, stopSpeech]);
+
+  /**
    * 收藏和注释横跨好几部片，只有当前这部才有原声可放，其余的退回合成音。
    *
    * 时间点用记录里存的那份而不是重新查字幕：字幕换过版本下标就对不上了，
@@ -940,13 +960,14 @@ function StudyApp({ user, sessions, onLogout, onChangePassword, onLogoutOthers }
    * 不用为朗读另做一套跟随；顺带也让你随时能切回原声接着这儿看。
    */
   const readAloudFrom = useCallback(
-    async (startIndex: number, range?: { from: number; to: number }) => {
+    async (startIndex: number, range?: { from: number; to: number; wrap?: boolean }) => {
       /**
        * 圈定的循环段落念到头要绕回去，读模式里点某一段却是念完就停——
        * 那是「把这段读给我听」，不是「把这段循环给我听」。
+       * 读模式的段落循环两者都要，所以由调用方拿 wrap 明说。
        */
       const bounds = range ?? (loop?.end != null ? { from: loop.start, to: loop.end } : null);
-      const wrap = !range;
+      const wrap = range ? !!range.wrap : true;
       let index = bounds ? Math.min(Math.max(startIndex, bounds.from), bounds.to) : startIndex;
       if (index < 0 || index >= displaySegments.length) return;
 
@@ -988,6 +1009,55 @@ function StudyApp({ user, sessions, onLogout, onChangePassword, onLogoutOthers }
   useEffect(() => {
     if (voice !== 'synth') stopReadAloud();
   }, [stopReadAloud, voice]);
+
+  /**
+   * 读模式里按段循环，跟着发音开关走：原声就让播放器在这段里绕圈，
+   * 合成音就一句接一句念、念到段尾绕回段首。
+   *
+   * 两条路都把 loop 记下来，界面才知道是哪一段在循环；也让中途切换发音档时
+   * 循环的是同一段。合成音这一路不需要片源，所以没选视频时它照样能用。
+   */
+  const loopParagraph = useCallback(
+    (from: number, to: number) => {
+      const first = displaySegments[from];
+      if (!first) return;
+
+      // 再点一次就是收工，两种声音都得停
+      if (loop?.mode === 'range' && loop.start === from && loop.end === to) {
+        setLoop(null);
+        stopReadAloud();
+        player.pause();
+        return;
+      }
+
+      releaseOneShot();
+      setLoop({ mode: 'range', start: from, end: to });
+
+      if (!canUseOriginal) {
+        readAloudFrom(from, { from, to, wrap: true });
+        return;
+      }
+
+      stopSpeech();
+      cancelReadAloud();
+      seekTo(first.start + offset);
+      playVideo();
+    },
+    [
+      canUseOriginal,
+      cancelReadAloud,
+      displaySegments,
+      loop,
+      offset,
+      player,
+      playVideo,
+      readAloudFrom,
+      releaseOneShot,
+      seekTo,
+      stopReadAloud,
+      stopSpeech
+    ]
+  );
 
   /**
    * 播放键的意思是「从选中的那一句起，顺着往下放」。
@@ -1289,13 +1359,15 @@ function StudyApp({ user, sessions, onLogout, onChangePassword, onLogoutOthers }
         return;
       }
       const asset = result.assets[0];
+      // 同 openMovie：换片之前先把上一部的声音收干净
+      stopEverything();
       setActiveMovie(null);
       setVideoSource({ kind: 'local', uri: asset.uri, label: asset.name });
       setStatus(null);
     } catch (error) {
       setStatus(`打开文件选择框失败：${(error as Error).message}`);
     }
-  }, []);
+  }, [stopEverything]);
 
   /**
    * 从学习列表点进来。片子走后端串流，label 仍用文件名——
@@ -1303,6 +1375,8 @@ function StudyApp({ user, sessions, onLogout, onChangePassword, onLogoutOthers }
    */
   const openMovie = useCallback(
     (movie: Movie) => {
+      // 上一部还在响的话会盖着新片子，换源那一下并不保证把声音掐掉
+      stopEverything();
       if (!movie.inStudyList) library.addToStudy(movie.id);
       setActiveMovie(movie);
       setVideoSource({ kind: 'remote', uri: streamUrl(movie.id), label: movie.name });
@@ -1310,8 +1384,19 @@ function StudyApp({ user, sessions, onLogout, onChangePassword, onLogoutOthers }
       setSettingsOpen(false);
       setStatus(movie.lastPosition > 0 ? `上次看到 ${formatTime(movie.lastPosition)}` : null);
     },
-    [library]
+    [library, stopEverything]
   );
+
+  /**
+   * 回学习列表。除了停声音，读/写模式那几层也得收掉：
+   * 它们盖在整屏上，留着的话下次点进另一部片子会直接落在上一部的读模式里，
+   * 而那会儿新片子的字幕还没加载。
+   */
+  const backToLibrary = useCallback(() => {
+    stopEverything();
+    setStudyMode(null);
+    setView('library');
+  }, [stopEverything]);
 
   /**
    * 选一部片子传到后端。这里必须让 DocumentPicker 复制到缓存
@@ -1616,7 +1701,7 @@ function StudyApp({ user, sessions, onLogout, onChangePassword, onLogoutOthers }
         noteCount={notes.notes.length}
         onOpenFavorites={() => setMarksTab('favorites')}
         onOpenNotes={() => setMarksTab('notes')}
-        onBackToLibrary={() => setView('library')}
+        onBackToLibrary={backToLibrary}
         onOpenAccount={() => setAccountOpen(true)}
         userName={user.displayName}
         compact={stacked}
@@ -1834,6 +1919,8 @@ function StudyApp({ user, sessions, onLogout, onChangePassword, onLogoutOthers }
           onNext={goToNext}
           onPlayOriginal={videoSource ? playRange : null}
           onPlaySynth={(from, to) => readAloudFrom(from, { from, to })}
+          loopRange={loop?.end != null ? { start: loop.start, end: loop.end } : null}
+          onLoopParagraph={loopParagraph}
           onStop={stopSaying}
           onSeekIndex={(index) => {
             const target = displaySegments[index];

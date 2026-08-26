@@ -24,12 +24,64 @@ export function useSpeech() {
     setIsSpeaking(true);
 
     return new Promise<void>((resolve) => {
+      let settled = false;
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+
       const release = () => {
-        if (tokenRef.current === token) setIsSpeaking(false);
-        // 念完得把音频会话要回来，理由见 reclaimAudioSession
-        reclaimAudioSession();
+        // 打断时 onStopped 和 onDone 都可能来，别把同一段结算两遍
+        if (settled) return;
+        settled = true;
+        clearTimeout(watchdog);
+
+        const latest = tokenRef.current === token;
+        if (latest) setIsSpeaking(false);
         resolve();
+
+        /**
+         * 音频会话要等一拍再抢，而且只在没有下一句接上时才抢。
+         *
+         * 抢会话（setAudioModeAsync）是异步的，原先在 resolve 之前就发出去了。
+         * 串着念的时候，resolve 会让 readAloudFrom 那个 await 立刻接着跑下一句，
+         * 于是新的 utterance 刚起头，上一句遗留的会话重配才落地，正好把它掐死——
+         * 而且掐掉之后一个回调都不来，那串 await 就永远等在那儿。
+         * 表现就是「只念当前句，不往下走」，且只在手机上出现：
+         * 网页端 reclaimAudioSession 是空操作，压根没有这一跳。
+         *
+         * 放进 setTimeout 之后，下一句的 speak 会先跑（Promise 续体是微任务，
+         * 排在宏任务前面），tokenRef 随之递增，这里就认得出「后面还有」而跳过。
+         * 真的念完收工时没人递增 token，会话照旧抢得回来。
+         */
+        if (!latest) return;
+        setTimeout(() => {
+          if (tokenRef.current === token) reclaimAudioSession();
+        }, 0);
       };
+
+      /**
+       * 回调丢了也得能收场。iOS 上 utterance 被外部打断时偶尔什么回调都不发，
+       * 而连续朗读整个卡在这一句上，除了按停止没有别的出路。
+       * 所以给一个宽到不可能误伤的时限：还在念就接着等，真不念了才结算。
+       */
+      const budget = Math.max(5000, value.length * 250);
+      const arm = () => {
+        watchdog = setTimeout(async () => {
+          // 已经被后来的请求顶掉了，那 isSpeaking 问的是别人，别拿它续命
+          if (tokenRef.current !== token) {
+            release();
+            return;
+          }
+          try {
+            if (await Speech.isSpeakingAsync()) {
+              arm();
+              return;
+            }
+          } catch {
+            // 问不出来就按没在念处理，总好过一直挂着
+          }
+          release();
+        }, budget);
+      };
+      arm();
 
       try {
         Speech.stop();

@@ -25,6 +25,10 @@ type Props = {
   onPlayOriginal: ((from: number, to: number) => void) | null;
   /** 合成音逐句念这一段，念完就停 */
   onPlaySynth: (from: number, to: number) => void;
+  /** 正在循环的句子区间，用来标出是哪一段在循环。没有循环时为 null */
+  loopRange: { start: number; end: number } | null;
+  /** 反复放这一段，再点一次停。放原声还是合成音由上面的发音开关定 */
+  onLoopParagraph: (from: number, to: number) => void;
   onStop: () => void;
   /** 点某一句：跳过去接着往下播，页面留在原地 */
   onSeekIndex: (index: number) => void;
@@ -62,6 +66,8 @@ export function ReaderScreen({
   onNext,
   onPlayOriginal,
   onPlaySynth,
+  loopRange,
+  onLoopParagraph,
   onStop,
   onSeekIndex,
   onClose
@@ -221,12 +227,14 @@ export function ReaderScreen({
           for (let i = item.from; i <= item.to; i += 1) lines.push(i);
           const number = page * perPage + index + 1;
           const onScreen = number - 1 === activePara;
+          // 循环区间是按句子下标存的，和这一段的首尾对得上才算「这一段在循环」
+          const looping = !!loopRange && loopRange.start === item.from && loopRange.end === item.to;
           // 这一段到底有没有词可排。缺译文的段落不该留一条空线出来
           const hasEn = lang !== 'zh' && lines.some((i) => !!segments[i].en);
           const hasZh = lang !== 'en' && lines.some((i) => !!segments[i].zh);
 
           return (
-            <View style={[styles.para, onScreen && styles.paraReading]}>
+            <View style={[styles.para, onScreen && styles.paraReading, looping && styles.paraLooping]}>
               <View style={styles.paraHead}>
                 <Text style={styles.paraNo}>{number}</Text>
                 <TouchableOpacity onPress={() => onSeekIndex(item.from)} hitSlop={6}>
@@ -244,6 +252,12 @@ export function ReaderScreen({
                 ) : null}
                 <TouchableOpacity onPress={() => onPlaySynth(item.from, item.to)} hitSlop={6}>
                   <Text style={styles.paraPlay}>跟读</Text>
+                </TouchableOpacity>
+                {/* 一段没听懂就把它按住反复放，比来回点「原声」省事 */}
+                <TouchableOpacity onPress={() => onLoopParagraph(item.from, item.to)} hitSlop={6}>
+                  <Text style={[styles.paraPlay, looping && styles.paraLoopOn]}>
+                    {looping ? '■ 停止循环' : '↻ 循环'}
+                  </Text>
                 </TouchableOpacity>
               </View>
 
@@ -465,6 +479,15 @@ const styles = StyleSheet.create({
   },
   paraReading: {
     backgroundColor: '#fff'
+  },
+  /** 循环中的那段描一圈边。底色已经被「正在读」占了，再叠一层就分不清 */
+  paraLooping: {
+    borderWidth: 1,
+    borderColor: '#2f80ed'
+  },
+  paraLoopOn: {
+    color: '#b0483f',
+    fontWeight: '600'
   },
   paraHead: {
     flexDirection: 'row',
